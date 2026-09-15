@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build output. Attach the zip to a release instead of committing it.
+dist/
+
+# Per-project data. Never commit a game's text, term table or saves.
+glossary.json
+glossary.local.json
+*.rmmzsave
+work/
+output/
+*.bak
+*.broken

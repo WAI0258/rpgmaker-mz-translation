@@ -1,0 +1,15 @@
+{
+  "_comment": "Term table template. Copy to glossary.json and fill in. This is the single source of truth for recurring names; feed it to the translator with every batch and apply it across all carriers AFTER the main translation pass. Keep it out of any published build.",
+  "_rules": [
+    "Match longest source term first, so a compound name is not split by its own prefix.",
+    "Never apply a term inside an identifier: plugin command names, parameter keys, note tag names, resource file names.",
+    "Preserve control codes and placeholders verbatim: \\N[n] \\V[n] \\C[n] \\I[n] \\G and %1-style placeholders.",
+    "After applying, re-run the audit to catch terms that re-contaminated already-translated text."
+  ],
+  "terms": {
+    "SOURCE_TERM": "TARGET_TERM"
+  },
+  "do_not_translate": {
+    "SOURCE_TERM": "reason - identifier looked up by name / matched by a plugin / proper noun of a real person"
+  }
+}
