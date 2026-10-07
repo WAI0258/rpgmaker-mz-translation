@@ -4,7 +4,7 @@
 Character-level helpers for handling Japanese text. These support rewriting operations only.
 
 Do NOT use `has_kana()` as the criterion for "is this translated". A Japanese word written entirely
-in kanji contains no kana and would be skipped. Use the backup-diff criterion instead; see
+in kanji contains no kana and would be skipped. Combine backup comparison with contextual review; see
 `references/pitfalls.md`.
 """
 
@@ -15,7 +15,7 @@ KATAKANA = r"\u30a0-\u30fa\u30fc-\u30ff"
 KANA_RE = re.compile(f"[{HIRAGANA}{KATAKANA}]")
 
 # Both encodings occur: backslash and ESC (0x1B).
-RUBY_RE = re.compile(r"(?:\\)|\x1b)RB\[([^,\]]+),([^\]]+)\]")
+RUBY_RE = re.compile(r"(?:\\|\x1b)RB\[([^,\]]+),([^\]]+)\]")
 
 
 def has_kana(text: str) -> bool:

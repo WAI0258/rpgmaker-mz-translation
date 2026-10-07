@@ -21,7 +21,7 @@ appear in source text and are commonly preserved or mapped to their Chinese equi
 
 ### Ruby
 
-`\RB{kanji,reading}` and `\x1bRB{kanji,reading}` both occur. Only the kanji side is translated.
+`\RB[kanji,reading]` and `\x1bRB[kanji,reading]` both occur. Only the kanji side is translated.
 Readings are kept. See `pitfalls.md`.
 
 Ruby bases frequently contain traditional forms of characters (`陰`, `決`, `闘`, `挿`, `愛`, `絶`,
@@ -72,4 +72,4 @@ translated, despite being readable as Chinese at a glance:
 肉体遍歴  性感帯開発度  経験人数  変態度  出産経験  性器状態  名家の子  初体験
 ```
 
-The backup-diff criterion in `pitfalls.md` catches these. Glyph-based heuristics do not.
+Backup comparison finds unchanged candidates; changed text still requires contextual review. Glyph heuristics alone cannot certify translation.

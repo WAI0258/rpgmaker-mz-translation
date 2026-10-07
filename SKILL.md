@@ -3,6 +3,8 @@ name: rpgmaker-mz-translation
 description: "Translates RPG Maker MV/MZ games by editing their text carriers directly: event-command dialogue and database fields in data/*.json, nested parameters in js/plugins.js, strings hardcoded in js/plugins/*.js, text baked into encrypted img/*.png_, and text stored in save/*.rmmzsave. This skill should be used when asked to translate, localize, or audit a RPG Maker MV/MZ game, when asked where a RPG Maker game's text lives or which files to edit, or when a patched game still shows untranslated text in its UI."
 license: MIT
 agent_created: true
+metadata:
+  version: "1.1"
 ---
 
 # RPG Maker MV/MZ Translation
@@ -13,6 +15,8 @@ The engine layer (finding text, editing text, auditing, saves, images) is langua
 Verified on Japanese → Chinese. Other language pairs need a profile under `scripts/lang/`; see
 `references/lang-pair-ja-zh.md` for the shape of one.
 
+Read `references/validation.md` for the v1.1 inventory contract, evidence and acceptance boundaries.
+
 ## Text carriers
 
 Text is not in one place. It lives in five carriers:
@@ -22,7 +26,7 @@ Text is not in one place. It lives in five carriers:
 | `data/*.json` | event dialogue, choices, plugin commands, database names/descriptions | `references/text-map.md` |
 | `js/plugins.js` | plugin parameters; values are nested JSON strings | `references/text-map.md` |
 | `js/plugins/*.js` | UI strings hardcoded in plugin source | `references/text-map.md` |
-| `img/*.png_` | text baked into encrypted images | `scripts/encrypt_img.py` |
+| `img/*.png_` | text baked into encrypted images | `scripts/encrypt_img.py`, then `references/image-redraw.md` |
 | `save/*.rmmzsave` | text frozen in player saves | `scripts/saves_codec.py` |
 
 Read `references/text-map.md` before extracting anything. It lists the event-command codes that
@@ -31,36 +35,81 @@ carry text, the exact fields to translate, and the fields to leave alone.
 ## Procedure
 
 1. **Back up.** Copy `data/` and `js/plugins.js` to a pristine backup outside the game tree.
+   Back up each plugin source, image, save or other carrier before its first edit too.
    Do not modify anything until the backup exists. All later steps compare against it.
 2. **Extract.** Run `python scripts/audit_visible_jp.py --current <game/data> --backup <backup/data>
    --plugins <game/js/plugins.js> --plugins-backup <backup/js/plugins.js> --out <report>`.
-   It walks every carrier, resolves each leaf to a JSON path, and classifies by visible/not-visible.
-   It reports; it does not decide. Judge visibility yourself against the plugin set this game ships.
-3. **Translate.** Batch the output (~230 units per batch). Keep one glossary file as the single
-   source of truth for recurring names; feed it with every batch.
+   Add `--json-out <inventory.json>` for the complete machine-readable inventory. This script scans
+   only `data/*.json` and optional `plugins.js`; inspect plugin source, images, saves and bundled docs
+   separately. It reports native display fields, unknown fields and editor/identifier metadata.
+   Unknown plugin arguments require source inspection. `::<json>` marks a virtual path inside a
+   JSON-encoded string: decode and re-encode that enclosing value when writing back.
+   **Recurse into every event parameter, at any depth** — plugin commands put display text inside
+   nested objects (`parameters[3].text`), which a `isinstance(str)` filter drops without error.
+3. **Translate.** Batch by dialogue/scene or UI context; size batches to the available context budget.
+   Keep one glossary file as the single source of truth for recurring names; feed it with every batch.
+   **Semantic spot-check every draft before accepting it:** read consecutive entries together and
+   confirm the sentences connect. A draft that splits one sentence across two lines and merges two
+   elsewhere keeps the entry count and the control codes valid, so structural checks pass while the
+   whole batch is misaligned. See `references/pitfalls.md`.
 4. **Apply.** Write back by JSON path with whole-string matching. Preserve control codes exactly.
    Abort the whole run if any expected old value does not match — never write a partial patch.
 5. **Post-process.** Handle ruby text, install a font if the target language needs one, and
    validate `js/plugins.js` (see below).
-6. **Audit.** Run the extractor again against the backup. Treat only the paths that still differ
-   from the original as candidates; see `references/pitfalls.md` for why kana detection is wrong.
-7. **Install.** Replace the live files, keeping the previous versions until the game launches clean.
-8. **Clean up.** Remove every work artifact before shipping. Follow `references/release.md`
+6. **Audit.** Run the audit against the backup. Review unchanged CJK and changed text still
+   containing kana; neither class proves a translation error. Changed kanji-only text still needs
+   semantic review. Exit 0 means the audit completed, not that translation is complete; exit 1 means
+   input/structure/choice validation failed. Review all unknown fields before claiming coverage.
+   Then run a **proper-noun consistency pass** — batches are translated independently, so drift is
+   invisible to any single-string check:
+   - (a) review differing targets for the same source **in the same semantic context**; the same
+     source can legitimately have different translations across speakers, senses or UI uses;
+   - (b) group alternative spellings only after confirming they refer to the same entity/concept.
+     Apply the glossary to that entity; do not automatically merge similar source strings;
+   - (c) regex-scan the target text for surface variants of each name (e.g. `..莉娜`) to catch stray
+     transliterations.
+   A source name may legitimately become a pronoun when the addressee *is* that person (`アリナ` → 「你」
+   when another character speaks *to* Arina) — review these, do not auto-fix.
+   Every check you add must be able to fail: if you cannot name an input that would make it report
+   a problem, it is measuring nothing. See `references/pitfalls.md`.
+   **Cross-form check:** the same value often appears in more than one command form (a flat
+   `command = value` string and a nested `parameters[n].text` object, for example). If one form is
+   translated and the other is not, inspect both consumers: it may be a missed payload or merely an
+   editor-only annotation (`657`). Do not infer player visibility from matching text alone.
+7. **Image text (optional).** Inspect images read-only and report text-bearing candidates. Ask
+   whether to leave them, translate selected groups, or translate all confirmed text; title art and
+   ordinary UI can be separate choices. Normal text-translation approval does not authorize images.
+   After scope approval, make representative samples from pristine backups in a work directory.
+   Show an **original → translated preview compare**, including wording, font, layout, colours and
+   transparency. Do not write samples into the game. **Wait for the user's approval of the compare
+   before batch editing or installing images.** Process only the approved scope and style; a new
+   image category or material style change needs a supplementary compare and approval.
+   Follow `references/image-redraw.md` for optional OCR, redraw methods and visual validation.
+8. **Install.** Replace the live files, keeping the previous versions until the game launches clean.
+9. **Clean up.** Remove every work artifact before shipping. Follow `references/release.md`
    exactly — it lists what to delete and what must never be touched.
 
 ## Hard rules
 
-- A string qualifies as untranslated only if it is **identical to the original backup at the same
-  path**. Do not use script detection (kana, CJK ranges) as the criterion — it silently skips
-  Japanese words written entirely in kanji. See `references/pitfalls.md`.
+- Backup equality measures whether a string changed, not whether it is translated. Use it with
+  source-language candidates and contextual review; kanji-only Japanese defeats kana-only checks.
+  Preserve a decision record for reviewed unchanged strings and context-dependent translations.
 - Never modify identifier strings: plugin-command names, plugin parameter **keys**, `note` tag
-  names, `meta` keys, resource file names, and `__collapsed`.
+  names, `meta` keys, resource file names, and `__collapsed`. This covers the *label* half of
+  `command = value` parameters — translate the value only after confirming its runtime consumer.
 - Plugin parameters whose value is matched by the plugin against event data must keep their
   original value. Translating them disables features silently. See `references/pitfalls.md`.
 - Every value written into `js/plugins.js` `parameters` must be a string.
 - Preserve control codes and placeholders verbatim: `\N[n] \V[n] \C[n] \I[n] \G \. \| \{ \} \$`
   and `%1`-style placeholders.
-- Keep `code: 102` choice labels and their `code: 402` branch labels identical.
+- Keep `code: 102` choice labels and their `code: 402` branch labels identical. The label is
+  `402.parameters[1]`; `parameters[0]` is the branch index. Assert the pairing over the whole event
+  list using choice-block boundaries and indentation — see `references/pitfalls.md`.
+- **One writer per file at a time.** Independent passes based on stale snapshots can undo each other.
+  Make a second concern a pass *after* the writer, not a second script re-deriving the same fields.
+- Never address `data/*.json` content by container index; locate by JSON path. Debug snippets
+  mutate the tree and their writes ship. Structural comparison against the backup is the only
+  reliable detector.
 - Fail closed: verify the expected old value before writing; re-read after writing.
 
 ## Validating plugins.js
