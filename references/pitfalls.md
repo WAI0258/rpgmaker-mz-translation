@@ -11,15 +11,15 @@ These look like Chinese and pass as translated.
 
 Use instead:
 
-> A leaf is an untranslated candidate when it is **byte-identical to the original backup at the same
+> A leaf is an untranslated candidate when it is **equal to the original parsed value at the same
 > path** and contains CJK.
 
 This catches unchanged kanji-only candidates but is not a translation verdict. Legitimately retained
 terms may be unchanged; adding punctuation to Japanese makes it changed without translating it.
 Also review changed text containing kana and inspect changed kanji-only text semantically.
 
-**Do not rely on a whitelist of JSON paths.** A narrow whitelist produces a false "nothing left"
-result. Walk every field recursively. Fields that have been missed this way: glossary UI labels under
+**Do not use a display whitelist as proof of complete coverage.** Known display paths are useful
+for prioritization; inspect unknown/protected and excluded candidates too. Walk every field recursively. Fields that have been missed this way: glossary UI labels under
 `party._glossarySetting`, plugin-owned parameter arrays, map names, and display-name override fields
 stored under non-obvious keys.
 
@@ -63,6 +63,30 @@ The same trap hides in the source of the plugin itself:
   label. If `plugins.js` stores the value under that key, translating it makes the lookup return
   nothing and the setting silently falls back to the code default.
 - `enemy.meta['HPバーX']` — matches a `<HPバーX>` note tag. Translating it breaks the match.
+
+## The same text can be display content and program input
+
+A measured incident had a database `name` containing `MP再生値:10` beside
+`note: "<MP再生値:10>"`. Replacing the escaped source text without its JSON quotes changed both,
+including the text inside the tag. The enabled `RegenerationFixed` plugin could no longer find
+`MP再生値`, so fixed MP recovery disappeared. Native MP regeneration does not read this tag:
+`SimplePassiveSkillMZ` adds the referenced armour to the actor's trait objects, and
+`RegenerationFixed` reads metadata from those objects and adds fixed recovery.
+
+The subsequent masking script still replaced by value, despite carrying paths. Identical display
+and note values were both masked; identical display and resource values could both be replaced.
+A count of one does not prove permission to edit; a count of two does not identify the safe occurrence.
+
+Use `scripts/apply_translation.py` and `safe-patching.md`: select the exact path, verify the old
+value and source digests, then validate every actual change against that plan independently. Do not
+copy the masking approach or create another global replacer. `note`/`meta` are frozen by default.
+They may contain plugin-rendered prose, so investigate the consumer instead of declaring them
+universally invisible. A dedicated exception must preserve tag syntax and program dependencies.
+
+A structural comparison that permits every string change is insufficient. The original auditor
+recorded changed notes but did not fail them. The first incident checker also skipped event `code`
+and `indent`, ignored new metadata, confused bool/int equality and called parsed equality byte
+identity. Regression tests must make those defects fail, while allowing valid files with zero notes.
 
 ## Audits that stop at quoted literals
 

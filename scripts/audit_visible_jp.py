@@ -3,14 +3,21 @@
 
 Unchanged CJK and changed text still containing kana are review candidates, not
 translation verdicts. Plugin arguments require inspection of the actual plugin.
-Exit 1 means incomplete input or structural/choice validation failed; exit 0
+Exit 1 means input, structural, protection, choice or manifest validation failed; exit 0
 means the audit ran, never that a game's translation is complete.
 """
 import argparse
 import json
 import re
+import sys
 from collections import Counter
 from pathlib import Path
+
+# runpy-based callers do not automatically add the script directory to sys.path.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from json_safety import (Document, PROTECTED_KEYS, RESOURCE_KEYS, audit_selector,
+                         check_report_path, choice_errors, frozen_token_errors, strict_loads, structure_errors)
 
 KANA = re.compile(r"[\u3040-\u309f\u30a0-\u30fa\u30fc-\u30ff\uff66-\uff9f]")
 CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uff66-\uff9f]")
@@ -39,12 +46,21 @@ DB_VISIBLE = {
 EDITOR_DATABASES = {'CommonEvents', 'Troops', 'MapInfos', 'Tilesets', 'Animations'}
 
 
+def _unique_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f'duplicate JSON key: {key!r}')
+        result[key] = value
+    return result
+
+
 def load_plugins(path):
     text = path.read_text(encoding='utf-8-sig')
     match = re.search(r'\bvar\s+\$plugins\s*=\s*', text)
     if not match:
         raise ValueError('var $plugins assignment not found')
-    value, _ = json.JSONDecoder().raw_decode(text, match.end())
+    value, _ = json.JSONDecoder(object_pairs_hook=_unique_pairs).raw_decode(text, match.end())
     if not isinstance(value, list):
         raise ValueError('$plugins must be an array')
     return value
@@ -53,7 +69,7 @@ def load_plugins(path):
 def maybe_json(value):
     if isinstance(value, str) and value.strip().startswith(('{', '[')):
         try:
-            return json.loads(value), True
+            return strict_loads(value), True
         except json.JSONDecodeError:
             pass
     return value, False
@@ -68,59 +84,15 @@ class Audit:
         self.rows = []
         self.total = Counter()
         self.errors = []
+        self.manifest_checked = False
 
     def structure(self, cur, bak, path):
-        if type(cur) is not type(bak):
-            self.errors.append(f'{path}: type changed')
-        elif isinstance(cur, dict):
-            if cur.keys() != bak.keys():
-                self.errors.append(f'{path}: keys changed')
-            for key in sorted(cur.keys() & bak.keys()):
-                self.structure(cur[key], bak[key], child_path(path, key))
-        elif isinstance(cur, list):
-            if len(cur) != len(bak):
-                self.errors.append(f'{path}: length changed')
-            for i, (a, b) in enumerate(zip(cur, bak)):
-                self.structure(a, b, f'{path}[{i}]')
-        elif not isinstance(cur, str) and cur != bak:
-            self.errors.append(f'{path}: non-text value changed')
+        self.errors.extend(structure_errors(cur, bak, path))
 
     def choices(self, events, path):
-        active = {}
-        for index, event in enumerate(events):
-            if not isinstance(event, dict) or 'code' not in event:
-                continue
-            code, indent = event['code'], event.get('indent', 0)
-            params = event.get('parameters', [])
-            where = f'{path}[{index}]'
-            if code == 102:
-                if not params or not isinstance(params[0], list):
-                    self.errors.append(f'{where}: invalid choices')
-                    continue
-                if indent in active:
-                    self.errors.append(f'{where}: previous choice block not closed')
-                active[indent] = (params[0], set())
-            elif code == 402:
-                block = active.get(indent)
-                if block is None or len(params) < 2:
-                    self.errors.append(f'{where}: branch has no matching choice block')
-                    continue
-                labels, seen = block
-                i = params[0]
-                if type(i) is not int or not 0 <= i < len(labels):
-                    self.errors.append(f'{where}: invalid choice index')
-                elif i in seen or params[1] != labels[i]:
-                    self.errors.append(f'{where}: duplicate index or mismatched choice label')
-                if type(i) is int:
-                    seen.add(i)
-            elif code == 404:
-                block = active.pop(indent, None)
-                if block is not None and block[1] != set(range(len(block[0]))):
-                    self.errors.append(f'{where}: missing choice branch')
-        if active:
-            self.errors.append(f'{path}: unclosed choice block')
+        self.errors.extend(choice_errors(events, path))
 
-    def _cmp(self, cur, bak, path, src, role, visible, code=None, depth=0):
+    def _cmp(self, cur, bak, path, src, role, visible, code=None, depth=0, category=None):
         if depth > 32:
             self.errors.append(f'{src}:{path}: nesting exceeds 32; audit incomplete')
             return
@@ -132,14 +104,19 @@ class Audit:
             if not (decoded and original_decoded):
                 self.errors.append(f'{src}:{path}: encoded JSON shape changed')
                 return
-            self.structure(inner, original, f'{src}:{path}::<json>')
-            self._cmp(inner, original, path + '::<json>', src, role, visible, code, depth + 1)
+            if not self.manifest_checked and cur != bak:
+                self.structure(inner, original, f'{src}:{path}::<json>')
+                self.errors.extend(frozen_token_errors(Document(cur.encode('utf-8')), Document(bak.encode('utf-8')), f'{src}:{path}::<json>'))
+            self._cmp(inner, original, path + '::<json>', src, role, visible, code, depth + 1, category)
         elif isinstance(cur, dict) and isinstance(bak, dict):
             for key in sorted(cur.keys() & bak.keys()):
-                self._cmp(cur[key], bak[key], child_path(path, key), src, role, visible, code, depth + 1)
+                child_category = 'program' if key in PROTECTED_KEYS | RESOURCE_KEYS else category
+                child_visible = False if child_category == 'program' else visible
+                self._cmp(cur[key], bak[key], child_path(path, key), src, role, child_visible,
+                          code, depth + 1, child_category)
         elif isinstance(cur, list) and isinstance(bak, list):
             for i, (a, b) in enumerate(zip(cur, bak)):
-                self._cmp(a, b, f'{path}[{i}]', src, role, visible, code, depth + 1)
+                self._cmp(a, b, f'{path}[{i}]', src, role, visible, code, depth + 1, category)
         elif isinstance(cur, str) and isinstance(bak, str):
             if not cur.strip() and not bak.strip():
                 return
@@ -149,7 +126,9 @@ class Audit:
             self.rows.append({'src': src, 'role': role, 'visible': visible,
                               'path': path, 'text': cur, 'original': bak,
                               'status': 'unchanged' if cur == bak else 'changed',
-                              'has_kana': bool(KANA.search(cur))})
+                              'has_kana': bool(KANA.search(cur)),
+                              'category': category or ('display' if visible is True else 'unknown' if visible is None else 'editor'),
+                              'selector': audit_selector(path)})
 
     def walk_events(self, cur, bak, path, src):
         if isinstance(cur, dict) and isinstance(bak, dict):
@@ -168,7 +147,10 @@ class Audit:
                         vis = False if i < 3 else None
                     elif code in (320, 324, 325):
                         vis = i == 1
-                    self._cmp(a, b, child_path(path, 'parameters') + f'[{i}]', src, role, vis, code)
+                    kind = 'display' if code == 402 and i == 1 else 'program' if (code == 101 and i == 0 or code == 357 and i < 2 or
+                                                  code in (118, 119, 231, 241, 245, 249, 250)) else None
+                    self._cmp(a, b, child_path(path, 'parameters') + f'[{i}]', src, role, vis, code,
+                              category=kind)
                 return
             for key in sorted(cur.keys() & bak.keys()):
                 self.walk_events(cur[key], bak[key], child_path(path, key), src)
@@ -197,7 +179,9 @@ class Audit:
                     visible = False
                 else:
                     visible = None
-                self._cmp(cur[key], bak[key], child_path(path, key), src, f'字段.{key}', visible)
+                kind = 'program' if key in PROTECTED_KEYS | RESOURCE_KEYS else None
+                self._cmp(cur[key], bak[key], child_path(path, key), src, f'字段.{key}',
+                          False if kind else visible, category=kind)
 
     def walk_plugin(self, cur, bak, path, src):
         self._cmp(cur, bak, path, src, '插件参数', None)
@@ -205,21 +189,52 @@ class Audit:
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--current', required=True)
-    ap.add_argument('--backup', required=True)
+    ap.add_argument('--task', help='workspace.json; use task paths and defaults')
+    ap.add_argument('--current')
+    ap.add_argument('--backup')
     ap.add_argument('--plugins')
     ap.add_argument('--plugins-backup')
-    ap.add_argument('--out', default='audit_visible_jp.txt')
+    ap.add_argument('--out')
+    ap.add_argument('--manifest', help='Verify all data changes against the reviewed path manifest')
     ap.add_argument('--json-out', help='Full inventory, exact selectors, classification and errors')
     ap.add_argument('--kana-only', action='store_true', help='Only display kana candidates in text samples')
     ap.add_argument('--max-sample', type=int, default=200)
     args = ap.parse_args(argv)
+    if args.task:
+        from translation_workspace import configure_task
+        try:
+            configure_task(args, 'audit')
+        except (OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
+            ap.error(str(exc))
+    if not args.current or not args.backup:
+        ap.error('provide --task or both --current and --backup')
+    if not args.out:
+        args.out = 'audit_visible_jp.txt'
+    if args.json_out and Path(args.out).resolve() == Path(args.json_out).resolve():
+        ap.error('--out and --json-out must select different files')
+    for report in (args.out, args.json_out):
+        if report:
+            try:
+                check_report_path(report, (args.current, args.backup), args.manifest, (args.plugins, args.plugins_backup))
+            except ValueError as exc:
+                ap.error(str(exc))
     if bool(args.plugins) != bool(args.plugins_backup):
         ap.error('--plugins and --plugins-backup must be supplied together')
     cur_dir, bak_dir = Path(args.current), Path(args.backup)
     if not cur_dir.is_dir() or not bak_dir.is_dir():
         ap.error('--current and --backup must be directories')
     au = Audit()
+    integrity = {'mode': 'protected-fields', 'complete': False}
+    if cur_dir.resolve() == bak_dir.resolve():
+        au.errors.append('current and backup must be independent directories')
+    if args.manifest:
+        from verify_untouched import verify_directories
+        try:
+            integrity = {'mode': 'manifest', **verify_directories(cur_dir, bak_dir, args.manifest)}
+            au.errors.extend(integrity['errors'])
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            au.errors.append(str(exc))
+        au.manifest_checked = True
     current = {p.name: p for p in cur_dir.glob('*.json')}
     backup = {p.name: p for p in bak_dir.glob('*.json')}
     if not current or not backup:
@@ -228,9 +243,17 @@ def main(argv=None):
         au.errors.append(f'{name}: file missing from current or backup')
     for name in sorted(current.keys() & backup.keys()):
         try:
-            cur = json.loads(current[name].read_text(encoding='utf-8-sig'))
-            bak = json.loads(backup[name].read_text(encoding='utf-8-sig'))
-            au.structure(cur, bak, name)
+            current_raw, backup_raw = current[name].read_bytes(), backup[name].read_bytes()
+            bak_doc = Document(backup_raw)
+            cur_doc = bak_doc if current_raw == backup_raw else Document(current_raw)
+            cur, bak = cur_doc.value, bak_doc.value
+            if current[name].samefile(backup[name]):
+                au.errors.append(f'{name}: current and backup refer to the same file')
+            # Identical bytes already prove structure and protected tokens unchanged.
+            # Keep parsing, choice validation and inventory extraction below.
+            if not args.manifest and current_raw != backup_raw:
+                au.structure(cur, bak, name)
+                au.errors.extend(frozen_token_errors(cur_doc, bak_doc, name))
             au.walk_events(cur, bak, '$', name)
             stem = current[name].stem
             dbname = 'Map' if re.fullmatch(r'Map\d+', stem) else stem
@@ -249,13 +272,15 @@ def main(argv=None):
                                f'$[{i}]["parameters"]', 'plugins.js')
         except (OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
             au.errors.append(f'plugins.js: {exc}')
+    integrity['complete'] = not au.errors
     candidates = [r for r in au.rows if r['status'] == 'unchanged' or r['has_kana']]
     lines = ['审计状态: ' + ('不完整/校验失败' if au.errors else '完成'),
              '范围: data/*.json 与可选 plugins.js；不扫描插件源码、图片、存档或文档。',
+             '完整写入验收需 --manifest；默认仅检查结构与已知受保护字段。',
              '候选不等于漏译；changed 不等于已翻译。未知可见性必须检查实际插件。',
              '::<json> 表示解码后的虚拟路径；写回时必须重新编码其外层字符串。', '']
     for visible, title in [(True, '原生显示字段'), (None, '待判定字段/脚本/插件参数'),
-                           (False, '编辑器/标识符/元数据')]:
+                           (False, '程序数据/编辑器信息；类别见完整清单')]:
         rows = [r for r in candidates if r['visible'] is visible]
         unchanged = sum(r['status'] == 'unchanged' for r in rows)
         lines.append(f'{title}: 未改动 CJK {unchanged}; 改动后仍含假名 {len(rows) - unchanged}')
@@ -267,7 +292,7 @@ def main(argv=None):
     lines.extend(['', '错误:'] + au.errors)
     Path(args.out).write_text('\n'.join(lines), encoding='utf-8')
     if args.json_out:
-        Path(args.json_out).write_text(json.dumps({'schema_version': 1, 'complete': not au.errors,
+        Path(args.json_out).write_text(json.dumps({'schema_version': 2, 'complete': not au.errors, 'integrity': integrity,
                                                   'rows': au.rows, 'errors': au.errors},
                                                  ensure_ascii=False, indent=2), encoding='utf-8')
     print(f'候选 {len(candidates)} / 校验错误 {len(au.errors)}; 报告: {args.out}')

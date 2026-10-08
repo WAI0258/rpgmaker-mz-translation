@@ -4,7 +4,7 @@ description: "Translates RPG Maker MV/MZ games by editing their text carriers di
 license: MIT
 agent_created: true
 metadata:
-  version: "1.1"
+  version: "1.2"
 ---
 
 # RPG Maker MV/MZ Translation
@@ -15,7 +15,7 @@ The engine layer (finding text, editing text, auditing, saves, images) is langua
 Verified on Japanese → Chinese. Other language pairs need a profile under `scripts/lang/`; see
 `references/lang-pair-ja-zh.md` for the shape of one.
 
-Read `references/validation.md` for the v1.1 inventory contract, evidence and acceptance boundaries.
+Read `references/validation.md` for the v1.2 inventory contract, evidence and acceptance boundaries.
 
 ## Text carriers
 
@@ -32,16 +32,34 @@ Text is not in one place. It lives in five carriers:
 Read `references/text-map.md` before extracting anything. It lists the event-command codes that
 carry text, the exact fields to translate, and the fields to leave alone.
 
+## Workspace
+
+For a translation task, once task editing is authorized, initialize/resume with
+`python -B <tool>/scripts/translation_workspace.py init --game <game>`.
+The target defaults to `zh-CN`; otherwise pass `--target-language <target>`.
+The default workspace is `<game-directory-name>_translation_work` beside the game;
+respect a user-selected external location via `--workspace`. Use the printed absolute
+`workspace.json` as `<task>` in all task commands. Read `references/workspace.md`
+for paths, resumption and external-tool/runtime checks. Do not initialize for a merely
+read-only question or require users to repeat these default rules in their prompt.
+
+Keep all task artifacts in this workspace: backups, glossary, translations, manifests,
+reports, compares, scripts, temporary files, caches and builds. Never modify the skill
+installation or scatter per-game artifacts into other directories. Use Python `-B`,
+absolute tool paths and task-mode scripts; run other commands through the workspace
+runner with explicit local outputs. The runner configures child cwd/temp/cache settings,
+not an OS sandbox. Inspect tools that ignore these settings before using them.
+
 ## Procedure
 
-1. **Back up.** Copy `data/` and `js/plugins.js` to a pristine backup outside the game tree.
-   Back up each plugin source, image, save or other carrier before its first edit too.
-   Do not modify anything until the backup exists. All later steps compare against it.
-2. **Extract.** Run `python scripts/audit_visible_jp.py --current <game/data> --backup <backup/data>
-   --plugins <game/js/plugins.js> --plugins-backup <backup/js/plugins.js> --out <report>`.
-   Add `--json-out <inventory.json>` for the complete machine-readable inventory. This script scans
-   only `data/*.json` and optional `plugins.js`; inspect plugin source, images, saves and bundled docs
-   separately. It reports native display fields, unknown fields and editor/identifier metadata.
+1. **Back up.** Initialization captures pristine data JSON and `plugins.js` in `backup/`
+   and makes independent working copies. Verify those backups before edits; keep them intact.
+   Back up each other carrier under the same workspace before its first edit too.
+2. **Extract.** Run `python -B <tool>/scripts/audit_visible_jp.py --task <task>`.
+   Read `reports/inventory.json` for the full inventory; `reports/audit.txt` is a summary.
+   This script scans only `data/*.json` and optional `plugins.js`; inspect plugin source, images, saves and bundled docs
+   separately. The complete inventory separates display, program, editor and unknown candidates;
+   `selector` gives pointer chains suitable for the patch manifest, not automatic write permission.
    Unknown plugin arguments require source inspection. `::<json>` marks a virtual path inside a
    JSON-encoded string: decode and re-encode that enclosing value when writing back.
    **Recurse into every event parameter, at any depth** — plugin commands put display text inside
@@ -52,14 +70,21 @@ carry text, the exact fields to translate, and the fields to leave alone.
    confirm the sentences connect. A draft that splits one sentence across two lines and merges two
    elsewhere keeps the entry count and the control codes valid, so structural checks pass while the
    whole batch is misaligned. See `references/pitfalls.md`.
-4. **Apply.** Write back by JSON path with whole-string matching. Preserve control codes exactly.
-   Abort the whole run if any expected old value does not match — never write a partial patch.
-5. **Post-process.** Handle ruby text, install a font if the target language needs one, and
-   validate `js/plugins.js` (see below).
-6. **Audit.** Run the audit against the backup. Review unchanged CJK and changed text still
+4. **Apply.** Read `references/safe-patching.md`. For `data/*.json`, build a reviewed path manifest
+   with source digests, expected old values and targets. Preflight `scripts/apply_translation.py`,
+   then use `--task <task> --write` to create `build/translated/data`; never globally replace strings or mask by
+   value. Explicitly select decoding boundaries for serialized plugin arguments. Record consumers
+   for non-native fields and list configuration changes separately. Run `scripts/verify_untouched.py`
+   with `--task <task>` before installation; it checks all actual differences and untouched bytes.
+   Unknown/excluded candidates need a decision record, not silent omission. Preserve control codes.
+5. **Post-process.** Handle ruby text and fonts through the same JSON manifest; regenerate the
+   working data if the plan changes rather than mutating an already verified copy. Font assets are
+   a separate carrier. Validate `js/plugins.js` after any write (see below).
+6. **Audit.** Run the task audit after applying; it selects the translated data and its manifest
+   for full data integrity. Review unchanged CJK and changed text still
    containing kana; neither class proves a translation error. Changed kanji-only text still needs
    semantic review. Exit 0 means the audit completed, not that translation is complete; exit 1 means
-   input/structure/choice validation failed. Review all unknown fields before claiming coverage.
+   input/structure/protection/choice or manifest validation failed. Review all unknown fields before claiming coverage.
    Then run a **proper-noun consistency pass** — batches are translated independently, so drift is
    invisible to any single-string check:
    - (a) review differing targets for the same source **in the same semantic context**; the same
@@ -85,15 +110,25 @@ carry text, the exact fields to translate, and the fields to leave alone.
    before batch editing or installing images.** Process only the approved scope and style; a new
    image category or material style change needs a supplementary compare and approval.
    Follow `references/image-redraw.md` for optional OCR, redraw methods and visual validation.
-8. **Install.** Replace the live files, keeping the previous versions until the game launches clean.
-9. **Clean up.** Remove every work artifact before shipping. Follow `references/release.md`
-   exactly — it lists what to delete and what must never be touched.
+8. **Install.** Test an independent complete game copy under `build/` when possible.
+   Show the changed-file list and obtain approval before replacing original game files;
+   recheck live originals and retain rollback copies in the workspace.
+9. **Deliver.** Keep work artifacts and backups in the workspace; exclude them from the
+   delivered build or patch. Follow `references/release.md`; packaging does not authorize
+   deleting the workspace or user-owned files.
 
 ## Hard rules
 
 - Backup equality measures whether a string changed, not whether it is translated. Use it with
   source-language candidates and contextual review; kanji-only Japanese defeats kana-only checks.
   Preserve a decision record for reviewed unchanged strings and context-dependent translations.
+- **Freeze `note`/`meta` by default.** Tags become runtime lookup keys; their values may be numbers,
+  references, expressions or plugin-rendered prose. Do not infer universal invisibility. Verified
+  display fragments require a dedicated plugin-specific procedure preserving program dependencies;
+  the generic writer does not permit note overrides. Displayed names can also be lookup keys.
+- **Permission belongs to a position, not a text value.** Use exact path patches and an independent
+  approved-difference check. Neither counting occurrences nor masking note literals makes global
+  replacement safe. Known resource/identifier changes must fail regardless of language or kana.
 - Never modify identifier strings: plugin-command names, plugin parameter **keys**, `note` tag
   names, `meta` keys, resource file names, and `__collapsed`. This covers the *label* half of
   `command = value` parameters — translate the value only after confirming its runtime consumer.
@@ -107,9 +142,8 @@ carry text, the exact fields to translate, and the fields to leave alone.
   list using choice-block boundaries and indentation — see `references/pitfalls.md`.
 - **One writer per file at a time.** Independent passes based on stale snapshots can undo each other.
   Make a second concern a pass *after* the writer, not a second script re-deriving the same fields.
-- Never address `data/*.json` content by container index; locate by JSON path. Debug snippets
-  mutate the tree and their writes ship. Structural comparison against the backup is the only
-  reliable detector.
+- Never invent keys such as `"0"` on a database object to simulate indexing. Use an exact JSON
+  Pointer into the actual array/object structure. Check every difference against the path manifest.
 - Fail closed: verify the expected old value before writing; re-read after writing.
 
 ## Validating plugins.js
@@ -117,8 +151,8 @@ carry text, the exact fields to translate, and the fields to leave alone.
 Run after any write to `js/plugins.js`:
 
 ```
-python scripts/fix_plugin_params.py --plugins <js/plugins.js> --backup <backup/js/plugins.js> --check
-node scripts/verify_plugins_js.js --plugins <js/plugins.js> --backup <backup/js/plugins.js>
+python -B <tool>/scripts/fix_plugin_params.py --plugins <workspace>/build/js/plugins.js --backup <workspace>/backup/js/plugins.js --check
+node <tool>/scripts/verify_plugins_js.js --plugins <workspace>/build/js/plugins.js --backup <workspace>/backup/js/plugins.js
 ```
 
 If either reports corruption (non-string parameter values), repair with

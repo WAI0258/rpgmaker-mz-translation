@@ -129,12 +129,33 @@ troops by their `pages[j]` position — the `id` field is not a positional match
 `System.json` also holds `advanced.mainFontFilename` — the font the game loads. Change it when the
 target language needs a font the game does not ship.
 
-### Fields never to translate
+### Program fields protected by default
 
-`note`, `meta`, `id`, any `*Id` field, `animationId`, script expressions, image and audio file names,
+`note`/`meta` subtrees, `id`, any `*Id` field, `animationId`, script expressions, image and audio file names,
 `encryptionKey`.
 
 `note` holds metadata tags such as `<tag: 150>` that plugins parse by name.
+
+#### Notes and derived metadata are program input
+
+`DataManager.extractMetadata` parses `<tag:value>` from `note` into `meta["tag"] = "value"`;
+valueless tags become boolean flags. Plugins can read these keys, parse the raw note themselves,
+or render selected text from notes. Preserve the entire subtree by default, not only the tag name.
+
+A real incident translated `<MP再生値:10>` while translating an armour name. The enabled
+`RegenerationFixed` plugin looked up the original tag and lost its fixed MP recovery; the native
+engine's percentage-based regeneration was not the consumer of that tag.
+
+The default protection is not a claim that notes never display. For example, the plugin author's
+[More Status Menu Pages documentation](https://www.yanfly.moe/wiki/More_Status_Menu_Pages_%28YEP%29)
+puts status titles and body text in actor notes; titles can also participate in switch associations.
+Likewise, displayed database names may be used as plugin lookup keys. Visibility is a candidate
+signal, not sufficient evidence that a global rename is safe.
+
+Report source-language notes as protected/consumer-review candidates. Translate a verified display
+fragment only through a dedicated plugin-specific procedure that preserves tags, references and
+relationships; the generic writer provides no note override. See `safe-patching.md` for the ordinary
+path writer and independent difference checks. Do not mask by text value before global replacement.
 
 ## `data/MapNNN.json` top level — `displayName`
 

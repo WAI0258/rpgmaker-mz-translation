@@ -1,55 +1,41 @@
-# Release cleanup
+# Patch delivery and cleanup
 
-## Goal
+Deliver a playable build or a selective patch containing only changed/runtime-required
+files. Keep the external translation workspace, pristine backups and decision records
+for recovery; exclude them from deliveries. Packaging never authorizes their deletion.
 
-Ship a build as clean as the original release. Every artifact created by the translation work must be
-gone, and nothing that belongs to the game or to the user may be removed.
+## Include
 
-Run this step before any delivery or packaging. It is part of the pipeline, not an optional tidy-up.
+- Checked translated game files, preserving required filenames and data structure.
+- Fonts or other assets added by the translation that the game references.
+- For a complete build, every required original runtime file and resource.
+- Concise installation instructions appropriate to the delivery format.
 
-## Delete
+## Exclude
 
-| Category | Examples |
-|---|---|
-| The translation working directory, in full | scripts, batches, backups, reports, term tables, intermediate JSON |
-| Extraction / translation / audit scripts | `*.py`, `*.js` written for this job |
-| Intermediate artifacts and reports | `*_dump.json`, `*_map.json`, `*.txt` reports, `*.html` reports |
-| Hand-written notes | `*.md` added during the work |
-| Temporary backups inside the data tree | `data/*.bak`, `*.broken`, `*.orig` — only after validation has passed |
-| Runtime logs produced during the work | `debug.log` and similar (the engine regenerates them; deleting is harmless) |
+- The translation workspace: backups, intermediate data, manifests, scripts, logs,
+  reports, glossary and image compares.
+- Agent memory directories such as `.workbuddy/` and `.claude/`.
+- Temporary files created by this task, identified from its records rather than merely
+  by an extension or filename prefix.
 
-## Keep
+## Preserve user files
 
-- **Every original game file**: executables, libraries, `*.pak`, `index.html`, `package.json`, shipped
-  fonts, and all resource directories.
-- **Files the translation added that the build requires**: the target-language font subset, referenced
-  by `System.json` → `advanced.mainFontFilename`. Removing it renders the translation as blank boxes.
-- **The translated `data/*.json` and `js/plugins.js`** — content is now in the target language, but
-  file names and structure must remain byte-for-byte structurally identical to the original.
+Do not delete original documentation, launchers, saves, libraries or third-party tooling
+such as locale loaders and injected DLLs. A shipped `.js`, `.md`, `.py`, `.log` or
+underscore-prefixed directory is not evidence that a file belongs to this task.
+Never sweep the game directory with extension-based or prefix-based deletion rules.
 
-## Never touch
-
-- **Launcher and injection files belonging to the user's own tooling.** If the user launches the game
-  through a third-party loader (for example MTool), the files it generated — launch `.bat` files,
-  injected DLLs, path markers, locale loaders — are the user's, not the project's. Skip them. Deleting
-  them breaks the user's workflow.
-- **Agent memory directories** (for example `.workbuddy/`, `.claude/`). Unrelated to the game; exclude
-  when packaging rather than deleting.
+If earlier work left task artifacts in the original game, identify exactly which files
+were created by that work. Propose moving them into the workspace, check resolved source
+and destination paths, and obtain authorization before changing the original tree.
 
 ## Verify
 
-1. Walk the whole tree for `*.bak`, `*.tmp`, `*.py`, `*.md`, `*.log`, and any `_`-prefixed directory.
-   Compare against the keep list. Expect zero hits.
-2. Confirm `data/` and `js/` file names and structure match the original exactly.
-3. Launch `Game.exe`. Confirm it starts, text renders correctly, and no error dialog appears.
-4. Read a save from before the translation. Confirm frozen text was handled or is understood to be
-   out of scope.
-
-## Delete safely
-
-Prefer the OS recycle bin, or rename to a `.del` suffix and remove after confirmation. Translation
-working directories often hold the only pristine copy of the original files — an irreversible delete
-destroys the rollback path.
-
-Bulk deletions may be intercepted by the platform's own bulk-delete guard above a threshold. Split
-into smaller batches or let the user confirm.
+1. Build the delivery under workspace `build/`; review its file list against the task's
+   changed-file list and required assets. Confirm no workspace artifacts are included.
+2. Validate JSON/plugin parameters and the actual patch contents, including font references.
+3. Test an independent full game copy when runtime testing is available; record launch,
+   text rendering and affected gameplay checks, or state which were not performed.
+4. Check compatibility with prior saves when in scope; do not modify player saves implicitly.
+5. Retain the workspace and rollback files unless the user separately requests cleanup.
