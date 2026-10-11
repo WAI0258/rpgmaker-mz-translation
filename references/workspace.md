@@ -26,7 +26,8 @@ working copies. It never writes into the game. Other carriers must be backed up 
 in the initial data/plugin digest ledger; validate them separately.
 
 Re-running initialization validates task/game/target identity and pristine backups.
-It does not overwrite backups or working files. A changed live game stops resumption;
+It does not overwrite backups or working files. A recorded installed version or pending
+install/rollback is recognized through `reports/install_state.json`. An unrecorded change stops resumption;
 inspect the difference instead of rebasing backups silently. An existing unrelated or
 incomplete directory is refused; preserve it for inspection or choose a new directory.
 `show --task <workspace.json>` validates and prints the stored task without requiring
@@ -51,6 +52,13 @@ live data equality, allowing inspection/recovery from the preserved snapshot.
 Do not create per-game scripts, logs or translations in the tool directory, game tree,
 Agent memory directories or another ad hoc artifact root. Client-owned internal state
 is controlled by the client, not this skill; do not add translation artifacts there.
+
+## Reuse and artifact lifecycle
+
+Resume and reuse task data and tools before extracting or writing helpers. Keep one
+current build/report set; validate replacements before retiring obsolete task-owned
+trials. Preserve required backups and user files. Image workflow details belong in
+`image-redraw.md`; packaging and general cleanup boundaries belong in `release.md`.
 
 ## Task commands
 
@@ -86,6 +94,60 @@ under `build/`, for example `--output build/revision-2/data`, and create its par
 Pass that current directory and manifest to both checks. Never patch an accepted build
 incrementally or overwrite it merely to make the default command run again.
 
+## Selective installation, recovery and cleanup
+
+For supported top-level data JSON, `js/plugins.js` and decoded `img/*.png`, use the
+same workspace entry. Plugin changes still need their separate syntax/semantic review;
+this entry does not certify arbitrary plugin edits. Encrypted images, plugin source,
+fonts and saves require their carrier-specific procedure; do not rename them to bypass
+the path whitelist. The accepted game from an older manual workflow is not automatically
+adopted into a new install journal; inspect and preserve its existing evidence.
+
+```sh
+python -B <tool>/scripts/translation_workspace.py plan-install --task <task>
+python -B <tool>/scripts/translation_workspace.py install --task <task>
+```
+
+`plan-install` reuses full JSON difference verification and approved image checks,
+then writes one `reports/install_manifest.json`: runtime-relative path, workspace
+output/backup and source/target SHA256 for each changed file, plus the data patch manifest
+reference. Installation rechecks current data/image/style configuration and plugin
+structure; a saved list cannot bypass subsequent changes. For a revised data build,
+pass `--current <build/data> --manifest <text/patch.json>`. It does not create a full
+game copy. Inspect this concrete list and use existing installation authorization,
+or obtain it when absent. Then:
+
+```sh
+python -B <tool>/scripts/translation_workspace.py install --task <task> --write
+python -B <tool>/scripts/translation_workspace.py rollback --task <task>
+python -B <tool>/scripts/translation_workspace.py rollback --task <task> --write
+```
+
+Install/rollback without `--write` only preflight. Every selected source, backup,
+output and live file is checked before any game write. Writes replace individual
+files atomically and verify hashes; the multi-file operation is **not** atomic.
+A pending journal precedes the first write. After interruption, resume the same
+installation plan or run rollback; finish a pending rollback before a new install.
+External edits refuse both operations. Rollback returns all journaled files to
+pristine backups, not the previous translation revision. Stop the game while writing.
+
+New successful installs keep a cumulative record of earlier installed files. Omitting
+an earlier entry does not revert it; if scope changes to retain an installed original,
+make that rollback explicit. After a complete rollback, a partial install keeps other
+files pristine. Keep the journal and backups; a missing journal makes a changed game
+unrecognized, rather than silently rebasing the original snapshot.
+
+```sh
+python -B <tool>/scripts/translation_workspace.py clean --task <task>
+python -B <tool>/scripts/translation_workspace.py clean --task <task> --write
+```
+
+Cleanup is deliberately narrow: only image outputs retired into the image state's
+obsolete list, inside `images/translated`, with their recorded hashes unchanged.
+It refuses current outputs, active installation artifacts, backups and outside paths.
+It leaves unregistered/user files alone. This is not a general recursive build/cache
+deletion command; inspect older task-owned trials before separately approved cleanup.
+
 ## Other tools and runtime checks
 
 The runner supplies workspace cwd and child-process temporary/cache settings:
@@ -100,15 +162,13 @@ and explicitly select outputs under the workspace for other bundled scripts and 
 tools. Check their actual cache/output behavior; environment settings are not a sandbox.
 If a required tool cannot keep its artifacts here, stop and explain before using it.
 
-For gameplay testing, prepare an independent complete game copy under `build/`, including
-its runtime assets. Do not launch the source-only data copy. Check where the game/launcher
-writes saves and logs before running; some external programs ignore cwd/temp settings.
-Do not claim runtime acceptance when only static checks ran.
-
-Images still require scope and compare approval. Before installing any files into the
-original game, show the changed-file list and get approval; recheck expected live originals.
-Retain backups in this workspace. Exclude the workspace from deliveries; do not delete it
-as part of packaging.
+Choose the runtime/delivery target from the user's request. A full independent game copy
+is optional, not the default: prefer a selective patch or approved direct installation
+when duplicating runtime assets has no concrete benefit. If requested/justified, keep
+one full copy under `build/`; never launch source-only data. Check save/log destinations.
+Record actual runtime observations or user acceptance, not just static checks or a
+running process. If tool/security policy blocks testing, report the limitation without
+adding a server, alternate browser or game clone to bypass it.
 
 Task-mode scripts validate resolved paths, including existing symlinks/junctions, before
 writing. They do not provide an OS sandbox or defend against another process replacing

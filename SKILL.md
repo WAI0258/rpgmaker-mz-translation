@@ -17,6 +17,16 @@ Verified on Japanese → Chinese. Other language pairs need a profile under `scr
 
 Read `references/validation.md` for the v1.2 inventory contract, evidence and acceptance boundaries.
 
+## Working defaults for Mr.WAI
+
+Use necessary story/operational information as scope; preserve all meaningful source
+content. Reuse tools and task data, approve representative samples once per method,
+and continue the approved stage. Keep one current artifact set and remove obsolete
+trials. Prefer a selective patch or authorized direct installation; no default game clone.
+See `references/image-redraw.md` for scope, fidelity and image approval, and
+`references/workspace.md` for reuse, delivery and cleanup. These standing preferences
+do not grant installation permission for a different game.
+
 ## Text carriers
 
 Text is not in one place. It lives in five carriers:
@@ -44,7 +54,11 @@ for paths, resumption and external-tool/runtime checks. Do not initialize for a 
 read-only question or require users to repeat these default rules in their prompt.
 
 Keep all task artifacts in this workspace: backups, glossary, translations, manifests,
-reports, compares, scripts, temporary files, caches and builds. Never modify the skill
+reports, compares, temporary files, caches and builds. Game differences belong in data,
+not new per-game scripts. Use `scripts/image_workflow.py` for supported image work;
+see `references/image-redraw.md` for its manifest and approval commands. The workspace
+entry also handles selective installation, rollback and recorded obsolete-image cleanup.
+Never modify the skill
 installation or scatter per-game artifacts into other directories. Use Python `-B`,
 absolute tool paths and task-mode scripts; run other commands through the workspace
 runner with explicit local outputs. The runner configures child cwd/temp/cache settings,
@@ -107,12 +121,17 @@ not an OS sandbox. Inspect tools that ignore these settings before using them.
    After scope approval, make representative samples from pristine backups in a work directory.
    Show an **original → translated preview compare**, including wording, font, layout, colours and
    transparency. Do not write samples into the game. **Wait for the user's approval of the compare
-   before batch editing or installing images.** Process only the approved scope and style; a new
-   image category or material style change needs a supplementary compare and approval.
+   before batch editing or installing images.** Continue within approved scope/style without
+   repeated approval requests. A materially different restoration/visual treatment needs a new
+   sample unless covered by the user's standing instruction; filenames/categories alone do
+   not create another approval gate.
    Follow `references/image-redraw.md` for optional OCR, redraw methods and visual validation.
-8. **Install.** Test an independent complete game copy under `build/` when possible.
+8. **Install.** Choose the user's requested selective patch or approved direct installation.
+   Do not clone the full game by default; use a full test copy only when requested or when its
+   concrete runtime benefit warrants the storage cost. Test the selected target when available.
    Show the changed-file list and obtain approval before replacing original game files;
-   recheck live originals and retain rollback copies in the workspace.
+   use existing explicit installation approval without asking again. Recheck live originals
+   and retain rollback copies in the workspace.
 9. **Deliver.** Keep work artifacts and backups in the workspace; exclude them from the
    delivered build or patch. Follow `references/release.md`; packaging does not authorize
    deleting the workspace or user-owned files.

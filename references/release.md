@@ -1,7 +1,7 @@
 # Patch delivery and cleanup
 
 Deliver a playable build or a selective patch containing only changed/runtime-required
-files. Keep the external translation workspace, pristine backups and decision records
+files, or install the reviewed changes directly when approved. Keep the external translation workspace, pristine backups and decision records
 for recovery; exclude them from deliveries. Packaging never authorizes their deletion.
 
 ## Include
@@ -32,10 +32,18 @@ and destination paths, and obtain authorization before changing the original tre
 
 ## Verify
 
-1. Build the delivery under workspace `build/`; review its file list against the task's
-   changed-file list and required assets. Confirm no workspace artifacts are included.
+1. For a delivery artifact, prepare it under workspace `build/`. For approved direct
+   installation, use the reviewed current outputs without another complete game copy.
+   Review the selected file list; exclude workspace artifacts.
 2. Validate JSON/plugin parameters and the actual patch contents, including font references.
-3. Test an independent full game copy when runtime testing is available; record launch,
-   text rendering and affected gameplay checks, or state which were not performed.
+3. Test the selected runtime target when available; a full clone is not mandatory.
+   Honour approved direct installation with changed-file backups, full source/target
+   preflight and post-write verification. Record actual observations or user acceptance;
+   static checks do not establish runtime acceptance.
 4. Check compatibility with prior saves when in scope; do not modify player saves implicitly.
 5. Retain the workspace and rollback files unless the user separately requests cleanup.
+
+
+Use the shared installation/recovery/cleanup commands in `workspace.md` for supported
+carriers. Preserve their manifest/journal rather than adding per-game delivery scripts.
+Use one current report for installed, retained, cleaned and unresolved results.

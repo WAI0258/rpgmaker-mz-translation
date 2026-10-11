@@ -1,138 +1,130 @@
-# Optional image-text translation
+# Image-text translation
 
-Text baked into a bitmap is a separate translation pass. Use this procedure only when inspection
-finds text that needs translation and the user chooses to process it. Ordinary dialogue or database
-translation does not authorize image editing. Images the user chooses to retain stay unchanged;
-record that scope when reporting completion.
+Translate images within the user's selected scope. Ordinary text translation alone
+is not image-edit permission. Apply standing scope/style decisions without repeating
+approval questions. Record translated, retained, uncertain and unreviewed separately.
 
-This workflow was learned from a game's custom balloons and status panels. It does not bundle an
-OCR engine or a universal redraw script. OCR is optional: visual transcription and measured regions
-may be sufficient. The encryption helper only handles the container, not recognition or translation.
+## Scope and source fidelity
 
-## 1. Inspect and ask about scope
+| Use | Default for Mr.WAI |
+| --- | --- |
+| Story, skill/equipment descriptions, status, meaningful menu/quest information | Translate |
+| Familiar English: Loading, Game Over, MISS, PRICE, SOLDOUT, simple navigation | Retain unless selected; accepted existing translations may stay |
+| Simple readable posters, brands, cosmetic inscriptions, engine branding | Retain unless meaningful to understanding or selected |
+| Stock BG/library signs | Retain; plot clues/navigation/objectives override this |
 
-Inspect copies of the assets, decrypting to a work directory where needed. Do not overwrite game
-files. Report the actual candidate files/groups and their uses, with thumbnails when useful.
-Offer **leave unchanged / translate selected groups / translate all confirmed text**. Let the user
-choose title logos and art lettering separately from ordinary UI labels.
+Decide from game context, not filenames, directories or presence of text. Inspect
+custom portraits, sprites and tiles too. OCR is optional evidence: magnify and verify
+characters, tags, questions/answers, parentheses, numbers, fees and symbols. Inspect
+low-confidence candidates; record uncertain readings without inventing or deleting.
+Re-read the actual sentence before excluding content on semantic grounds, including
+whether it describes a current profile or a past recollection.
 
-- Check custom assets even in sprite, portrait or tile directories. Directory names and component
-  counts cannot establish that an image contains no text.
-- OCR boxes, scores and geometry are candidate hints. Retain detection results for review; do not
-  discard a possible label solely because its confidence is low. Inspect skipped candidates too.
-- Read text at magnification and in game context. Verify OCR transcriptions and symbols visually;
-  record uncertain readings rather than inventing a translation.
-- Engine defaults, English labels and digits are not automatically translation targets. Decide from
-  the source/target languages and the user's scope, rather than assuming a fixed number of images.
+Keep game facts in one manifest, not per-game scripts or repeated inline programs.
+Reuse existing tools and pristine backups. Prefer local removal and deterministic
+text placement on restorable balloons/panels; generative redraw needs a demonstrated
+reason and accepted sample because it may change art, layout or wording.
 
-**Wait for the user's scope decision before making translation samples.** If the user declines,
-record the decision and continue the other translation work.
+## Shared entry and task data
 
-## 2. Make a compare and obtain approval
+`scripts/image_workflow.py` handles decoded RGB/RGBA PNGs, solid or planar-gradient
+restoration, typesetting, pixel checks and one generated compare. It needs Pillow and
+an installed target-language font; it does not install dependencies, perform OCR or
+reconstruct arbitrary texture. Encrypted containers use `scripts/encrypt_img.py` and
+`text-map.md` separately.
 
-Back up each selected original outside the game/build tree before editing and record its checksum.
-Keep the pristine source and translated output separate. Read the original from that backup whenever
-rendering a compare; never label an already edited image as the original.
+Keep `images/manifest.json` as the input and `images/state.json` as generated results
+and style approvals. `file` is below runtime `img/`; originals are backed up once in
+`backup/img/<file>` and current outputs are `images/translated/<file>`. No executable
+code in values. Replace this example's hash, transcription, geometry and font:
 
-Choose samples that represent the methods needed in the approved scope: plain labels, balloons,
-framed panels, semi-transparent backgrounds, or title art where applicable. Include difficult cases
-such as long translations, coloured labels and symbols. One easy sample does not cover a different
-background or layout family.
+```json
+{
+  "schema_version": 1,
+  "styles": {
+    "panel": {"font": "C:/Windows/Fonts/msyh.ttc", "size": 18,
+              "line_spacing": 24, "angle": 0, "restore": "solid"}
+  },
+  "assets": [{
+    "file": "pictures/panel.png", "source_sha256": "<original PNG SHA256>",
+    "decision": "translate", "reason": "Required story information",
+    "source_verified": true, "alpha_policy": "preserve",
+    "protected": [{"box": [200, 0, 320, 240]}],
+    "regions": [{
+      "box": [12, 12, 190, 100], "xy": [18, 18], "style": "panel",
+      "source": "Visually verified original including all tags and remarks",
+      "target": "完整译文（包括备注）", "lines": "完整译文（包括备注）",
+      "color": [0, 0, 0, 255], "background": {"color": [255, 255, 255, 255]}
+    }]
+  }]
+}
+```
 
-For each sample, show:
+Boxes use exclusive right/bottom endpoints. Slanted boundaries can use
+`polygon: [[x,y], ...]`. For `restore: "gradient"`, use region background
+`{"samples": [[x0,y0,x1,y1], ...]}`: visually verified blank source areas spanning
+both axes. The fitted RGBA plane cannot certify blank samples or reconstruct texture.
+Retain/uncertain rows need file, source hash, decision and reason, without regions.
 
-- The original and translated preview side by side at the same scale, plus magnified text crops.
-- The source transcription and proposed translation, including any uncertainty or omitted text.
-- Font, size, line breaks and colours; point out changes to positioning or art style.
-- RGBA previews on both light and dark backgrounds when transparency is involved.
+Measure erase regions inside the actual background and outside art, borders, tails,
+rules and fees. Masks that recover a balloon interior may swallow decoration or
+miss coloured/semitransparent text; verify them visually. Never use flat paint on a
+gradient, clear semitransparent labels to zero alpha, or ignore meaningful colour.
+`alpha_policy: "within_regions"` requires reviewed local alpha restoration.
 
-Samples belong only in the work directory. Ask the user to approve the wording, font, layout and
-appearance, or revise/retain the original. **Approval to inspect or make a sample is not approval to
-batch redraw or install. Wait for approval of the compare before either action.** Record the accepted
-samples, file groups and style. A newly discovered image family or material style change needs a
-supplementary compare and approval before processing it.
+Choose font/style before tuning positions. Check glyphs, fallback baselines and font
+licensing before distribution; font subsets must include image translations too.
+Use measured ink/cell bounds and semantic line breaks, not source row counts or font
+size alone. Do not truncate meaning, split numbers/words/ellipses, or strand punctuation.
 
-If the reading is uncertain, the backdrop cannot be restored reliably, or art lettering cannot be
-matched adequately, explain that limitation in the compare and offer to retain the original.
+## Samples, approval and reuse
 
-## 3. Redraw within the approved scope
+```sh
+python -B <tool>/scripts/image_workflow.py plan --task <task>
+python -B <tool>/scripts/image_workflow.py render --task <task> --sample --asset pictures/panel.png
+python -B <tool>/scripts/image_workflow.py compare --task <task>
+```
 
-Work from pristine copies using the accepted samples as the visual reference. Keep a per-file record
-of source text, translation, label regions and deliberate unchanged labels. Do not mix translation
-passes based on different source snapshots.
+Repeat `--asset` for representative cases: long wording, coloured labels, framing,
+slanted or transparent backgrounds. Show pristine/result at equal scale, magnified
+regions, source/target including uncertainty, and font/layout changes. Inspect alpha
+on light and dark backgrounds. A plain sample does not validate a different restoration.
 
-### Choose the method from the actual background
+After actual user approval, record the demonstrated style once:
 
-| Asset family | Suitable approach | What must be protected |
-|---|---|---|
-| Text inside a uniform balloon | Recover the interior, restore the backdrop, then typeset | Outline, tail, neighbouring art |
-| Framed status/profile panel | Restore only the selected label regions; lay out in measured cells | Rules, badges, other labels |
-| Semi-transparent panel | Restore the local RGB **and alpha**, then composite text | Backdrop opacity and colours |
-| Text over textured art or a logo | Use a restoration/art method demonstrated in the approved sample, or retain | Texture, shading, lettering style |
+```sh
+python -B <tool>/scripts/image_workflow.py approve --task <task> --style panel --note "User accepted panel sample wording and appearance"
+python -B <tool>/scripts/image_workflow.py render --task <task>
+python -B <tool>/scripts/image_workflow.py check --task <task>
+python -B <tool>/scripts/image_workflow.py compare --task <task>
+```
 
-Thresholds and margins must be measured for the asset. A technique that works for a white balloon
-is not a general eraser for panels or artwork.
+Approval binds style configuration and font bytes; changed style needs an accepted
+sample. Continue approved scope/method without per-batch questions. New wording and
+coordinates need source/layout review. A materially different treatment needs a new
+sample unless already covered by standing instructions. One compare is cheap to
+regenerate; omit it after approval if requested. Retain uncertain/unrestorable art.
 
-### Locate and restore
+`reuse_from: "pictures/earlier.png"` reuses an earlier asset in the same batch only
+when region configuration, format and editable source pixels match. Transfer only
+those pixels; recipient art/fees remain original. Different editable backgrounds fail
+and require independent rendering. Never transfer the whole image to an alias.
 
-- Measure label coordinates from the original; store boxes outside the rewriting logic. An expected
-  label region with no detected ink needs review, not silent skipping.
-- A light-interior mask has holes where dark text lies. Hole filling can recover a simple enclosed
-  balloon interior, but inspect the result before using it: a hole may be intentional decoration.
-- Keep erase regions inside the verified interior and outside protected borders. Intersecting a
-  padded row region with the interior can work for a uniform balloon; blindly dilating the whole
-  shape can damage slanted edges.
-- Separate text and rules in panels. An over-dilated rule mask can swallow descenders or collapse
-  the usable cell. Measure the cell from the original geometry and inspect the resulting protection
-  mask. Centre text in the intended cell, not across a separator or an arbitrarily selected cell.
-- Detect coloured and semi-transparent strokes too. Dark/opaque-only thresholds can miss them.
-  Preserve semantic colour coding; leave approved identical labels pixel-for-pixel unchanged.
-- Restore the actual local backdrop, including RGB and alpha. Clearing a semi-transparent label
-  to alpha zero creates holes; painting opaque white also changes the backdrop. A modal alpha alone
-  cannot distinguish every text stroke from its background. Use verified neighbouring backdrop
-  samples for uniform regions; use the approved restoration method for non-uniform ones.
+## Checks and delivery
 
-### Font and layout
+Checks reject target/lines mismatch, common numeric/word/ellipsis splits, stranded
+punctuation, missing-glyph rasters, clipping, overlapping regions, modified protected
+or outside pixels and unapproved alpha changes. They cannot prove source transcription,
+translation accuracy, region completeness, clean restoration or font aesthetics.
+Inspect every edited source/result region for omissions, residue and wrong placement;
+a hash or pixel count alone cannot establish those facts. Investigate unexpected
+pixel changes rather than weakening protection with blanket damage tolerances.
 
-Choose the typeface before tuning layout, using the approved sample and source style. A game font
-is a candidate only if it covers the translation and fits the artwork; check availability and the
-license before distributing any font. Dropping a plain font onto gradient/stroked logo lettering
-may change the artwork substantially and requires the user's decision.
-
-- Verify glyph coverage for all translated characters, punctuation and symbols. If building a font
-  subset, include every image translation table as well as JSON text. Register newly added tables.
-- Inspect fallback symbols for mismatched size or baseline. Choose a suitable supported fallback;
-  do not silently replace a symbol or punctuation with a different one merely to make it fit.
-- Measure rendered ink and effects, not font size or advance alone. Use actual cell/interior bounds
-  and approved margins; a short source line's blank space is not a suitable padding rule.
-- Prefer semantic line breaks. Check that the laid-out text preserves the complete translation,
-  accounting only for deliberate layout breaks. Never truncate lines to fit a slot.
-- Adjust wrapping or font size within the approved style. A shorter translation must preserve meaning
-  and be reviewed. Large source line spacing does not justify enlarging a small UI label.
-
-## 4. Validate, then install
-
-Before installing any batch:
-
-1. Open every edited image and inspect magnified source/result regions for misread text, omission,
-   residue, clipping, incorrect slots and colour changes. Compare against the accepted style.
-2. Assert dimensions and intended image mode are preserved. Check complete translation text and
-   rendered ink against its assigned region. Fixed labels use measured original slots; re-segmented
-   row counts are unreliable when taller target glyphs join neighbouring rows.
-3. Compare protected frame/art pixels with the pristine source. Check pixels outside authorized edit
-   regions remain unchanged. Treat unexpected differences as failures, rather than allowing an
-   arbitrary silhouette tolerance that could hide border damage.
-4. Inspect transparent results on light and dark backgrounds. Pixel counts or a white-only preview
-   cannot certify that source strokes are gone or backdrop alpha is correct.
-5. For encrypted assets, re-encrypt with the original key using `scripts/encrypt_img.py`, decrypt the
-   output again, fully load the image, and compare decoded pixels with the approved working output.
-   See `text-map.md` for the container format. Codec validation alone is not visual acceptance.
-
-Install only the approved, validated outputs, retaining backups and the prior live versions. If live
-files no longer match the expected originals, stop and review the conflict before replacing them.
-Launch the game and inspect the edited assets in their actual scenes, including backgrounds, scaling
-and plugin placement. Report any runtime verification that could not be performed.
-
-Keep approval records, translation tables and compares outside the release build. Follow `release.md`
-for packaging; retain the pristine backups separately. Report processed, deliberately retained and
-unresolved groups separately, without calling unreviewed images fully translated.
+Samples cannot be installed. Approved batch configuration/style/output hashes are
+rechecked by the workspace installer; uncertain rows are listed and excluded, not
+called translated. Encrypted delivery must round-trip through decoding and preserve
+the approved pixels. Use `workspace.md` for installation/recovery/cleanup and
+`release.md` for packaging. If scope changes to retain an already installed asset,
+make rollback explicit. Keep current data/results and required backups; retire only
+identified obsolete task artifacts, including temporary review crops. Inspect actual
+scenes when possible; distinguish static checks, installation and runtime/user acceptance.

@@ -4,10 +4,57 @@ Safety is independent of source-language detection. No plugin visibility inferen
 is attempted: unknown/editor text needs a recorded consumer review.
 """
 import json
+import hashlib
+import os
+import stat
+import tempfile
 import math
 from collections import Counter
 import re
 from pathlib import Path
+
+def inside(path, root):
+    return path == root or root in path.parents
+
+
+def overlap(a, b):
+    return inside(a, b) or inside(b, a)
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def regular(path, allow_hardlinks=False):
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or path.is_symlink() or
+            getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+        raise ValueError(f'expected a regular, unlinked file: {path}')
+    if info.st_nlink > 1 and not allow_hardlinks:
+        raise ValueError(f'hard-linked file is not allowed: {path}')
+
+
+def atomic_bytes(path, raw):
+    """Replace one checked file; interrupted multi-file writes are journaled separately."""
+    if path.exists():
+        regular(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix='.translation-', dir=path.parent)
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, 'wb') as file:
+            file.write(raw)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(staged, path)
+    finally:
+        if staged.exists():
+            staged.unlink()
+
+
+def write_json(path, value):
+    atomic_bytes(path, (json.dumps(value, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
+
 
 PROTECTED_KEYS = {'note', 'meta'}
 RESOURCE_KEYS = {'faceName', 'characterName', 'battlerName', 'battlerName1',
@@ -277,7 +324,6 @@ def json_files(directory):
 
 
 def snapshot_hash(raw_files):
-    import hashlib
     digest = hashlib.sha256()
     for name, raw in sorted(raw_files.items()):
         digest.update(name.encode('utf-8') + b'\0')

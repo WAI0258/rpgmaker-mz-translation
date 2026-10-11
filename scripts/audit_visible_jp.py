@@ -186,6 +186,21 @@ class Audit:
     def walk_plugin(self, cur, bak, path, src):
         self._cmp(cur, bak, path, src, '插件参数', None)
 
+    def plugins(self, current, backup):
+        self.structure(current, backup, 'plugins.js')
+        for index, (a, b) in enumerate(zip(current, backup)):
+            if a['name'] != b['name'] or a['status'] != b['status']:
+                self.errors.append(f'plugins.js[{index}]: plugin identity/order/status changed')
+            self.walk_plugin(a.get('parameters', {}), b.get('parameters', {}),
+                             f'$[{index}]["parameters"]', 'plugins.js')
+
+
+def verify_plugins(output, backup):
+    audit = Audit()
+    audit.plugins(load_plugins(output), load_plugins(backup))
+    if audit.errors:
+        raise ValueError('plugin verification failed: ' + str(audit.errors))
+
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
@@ -264,12 +279,7 @@ def main(argv=None):
         try:
             cur = load_plugins(Path(args.plugins))
             bak = load_plugins(Path(args.plugins_backup))
-            au.structure(cur, bak, 'plugins.js')
-            for i, (a, b) in enumerate(zip(cur, bak)):
-                if a['name'] != b['name'] or a['status'] != b['status']:
-                    au.errors.append(f'plugins.js[{i}]: plugin identity/order/status changed')
-                au.walk_plugin(a.get('parameters', {}), b.get('parameters', {}),
-                               f'$[{i}]["parameters"]', 'plugins.js')
+            au.plugins(cur, bak)
         except (OSError, ValueError, TypeError, KeyError, RecursionError) as exc:
             au.errors.append(f'plugins.js: {exc}')
     integrity['complete'] = not au.errors
